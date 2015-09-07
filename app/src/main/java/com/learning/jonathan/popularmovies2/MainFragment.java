@@ -64,7 +64,7 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
     // category = ?
     private static final String sCategory = MovieContract.MovieEntry.COLUMN_CATEGORY + " = ?";
 
-    public static final String API_KEY = "";
+    public static final String API_KEY = " ";
     private static final String SORT_ORDER_POPULAR = "popularity.desc";
     private static final String SORT_ORDER_RATED = "vote_average.desc";
 
