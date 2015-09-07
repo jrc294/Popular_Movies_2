@@ -10,6 +10,8 @@ import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
@@ -32,6 +34,7 @@ import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.GridView;
 import android.widget.ImageView;
+import android.widget.Toast;
 
 import com.learning.jonathan.popularmovies2.data.MovieContract;
 import com.squareup.picasso.Picasso;
@@ -61,7 +64,7 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
     // category = ?
     private static final String sCategory = MovieContract.MovieEntry.COLUMN_CATEGORY + " = ?";
 
-    public static final String API_KEY = "";
+    public static final String API_KEY = "55a28da47bcb9e5d99b2212363650383";
     private static final String SORT_ORDER_POPULAR = "popularity.desc";
     private static final String SORT_ORDER_RATED = "vote_average.desc";
 
@@ -153,12 +156,17 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
         }
 
         if (id == R.id.refresh) {
-            if (!getCurrentSortOrder().equals(MovieContract.Category.favorite)) {
-                // To refresh the data for the current , remove all movies from the database except favorite movies and reload the movie cache which will repopulate
-                getActivity().getContentResolver().delete(MovieContract.MovieEntry.CONTENT_URI, MovieContract.MovieEntry.COLUMN_IS_FAVORITE + " = ? AND " + MovieContract.MovieEntry.COLUMN_CATEGORY + " = ?", new String[]{"0", getCurrentSortOrder().toString()});
+            // Make sure there is an internet connection before refreshing
+            if (hasInternetConnection()) {
+                if (!getCurrentSortOrder().equals(MovieContract.Category.favorite)) {
+                    // To refresh the data for the current , remove all movies from the database except favorite movies and reload the movie cache which will repopulate
+                    getActivity().getContentResolver().delete(MovieContract.MovieEntry.CONTENT_URI, MovieContract.MovieEntry.COLUMN_IS_FAVORITE + " = ? AND " + MovieContract.MovieEntry.COLUMN_CATEGORY + " = ?", new String[]{"0", getCurrentSortOrder().toString()});
+                }
+                m_previous_category = "";
+                loadMovieCache();
+            } else {
+                Toast.makeText(getActivity(), getResources().getString(R.string.refresh_failed), Toast.LENGTH_LONG).show();
             }
-            m_previous_category = "";
-            loadMovieCache();
 
         }
         return super.onOptionsItemSelected(item);
@@ -223,29 +231,33 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
 
         // 1.1 If no movies exist in the database, load them up as long as we don't just want favorites
         if ((numberOfMoviesInCategory == 0) && (!category.equals(MovieContract.Category.favorite))) {
+            // Only attempt to load the movies if there is an internet connection
+            if (hasInternetConnection()) {
+                Display display = ((WindowManager) getActivity().getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+                switch (display.getRotation()) {
+                    case Surface.ROTATION_0:
+                        getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                        break;
+                    case Surface.ROTATION_90:
+                        getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                        break;
+                    case Surface.ROTATION_180:
+                        getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT);
+                        break;
+                    case Surface.ROTATION_270:
+                        getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                        break;
+                    default:
+                        break;
+                }
 
-            Display display = ((WindowManager) getActivity().getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
-            switch (display.getRotation()) {
-                case Surface.ROTATION_0 :
-                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                    break;
-                case Surface.ROTATION_90 :
-                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-                    break;
-                case Surface.ROTATION_180 :
-                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT);
-                    break;
-                case Surface.ROTATION_270 :
-                    getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-                    break;
-                default:
-                    break;
+                m_previous_category = category.toString();
+                FetchMoviesTask moviesTask = new FetchMoviesTask();
+                moviesTask.execute(category);
+                progressDialog = ProgressDialog.show(getActivity(), "Loading", "Please wait...", true);
+            } else {
+                Toast.makeText(getActivity(), getResources().getString(R.string.refresh_failed), Toast.LENGTH_LONG).show();
             }
-
-            m_previous_category = category.toString();
-            FetchMoviesTask moviesTask = new FetchMoviesTask();
-            moviesTask.execute(category);
-            progressDialog = ProgressDialog.show(getActivity(), "Loading", "Please wait...", true);
         } else {
             // 2. If the category has changed, refresh the adapter, or if we are showing only favories. In that case, we will also refresh just in case the user has moved some
             // movies out of favories
@@ -310,18 +322,12 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
 
         if (m_movieStore.size() > 0) {
             m_gridView.setAdapter(new ImageAdapter(getActivity(), m_movieStore));
-            if (progressDialog != null) {
-                progressDialog.dismiss();
-                getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
-            }
-        } else {
-            m_gridView.setAdapter(null);
         }
     }
 
     @Override
     public void onLoaderReset(Loader<Cursor> loader) {
-        // Do nothing
+        m_gridView.setAdapter(null);
     }
 
 
@@ -371,15 +377,23 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
         }
     }
 
-    public class FetchMoviesTask extends AsyncTask<MovieContract.Category, Void, Void> {
+    public class FetchMoviesTask extends AsyncTask<MovieContract.Category, Void, MovieContract.Category> {
 
         // Async task to retrieve the movie details from the movie database and receive a json string which is parsed and loaded into an ArrayList of Movie classes
 
         @Override
-        protected Void doInBackground(MovieContract.Category... params) {
+        protected MovieContract.Category doInBackground(MovieContract.Category... params) {
             MovieContract.Category category = params[0];
             getMovieData(category);
-            return null;
+            return category;
+        }
+
+        @Override
+        protected void onPostExecute(MovieContract.Category category) {
+            if (progressDialog != null) {
+                progressDialog.dismiss();
+                getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+            }
         }
 
         private void getMovieData(MovieContract.Category category) {
@@ -684,5 +698,12 @@ public class MainFragment extends Fragment implements LoaderManager.LoaderCallba
 
     }
 
+    // Taken from stack overflow at http://stackoverflow.com/questions/4238921/detect-whether-there-is-an-internet-connection-available-on-android
+    private boolean hasInternetConnection() {
+        ConnectivityManager connectivityManager
+                = (ConnectivityManager) getActivity().getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
+        return activeNetworkInfo != null && activeNetworkInfo.isConnected();
+    }
 
 }

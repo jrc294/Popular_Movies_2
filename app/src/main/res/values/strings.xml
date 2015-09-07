@@ -16,4 +16,5 @@
     <string name="reviews">Reviews...</string>
     <string name="trailers">Trailers</string>
     <string name="action_share">Share</string>
+    <string name="refresh_failed">Refresh failed. Check your network connection and choose refresh from the menu</string>
 </resources>
